@@ -46,6 +46,7 @@ cmd:option('-content_layers', 'relu4_2', 'layers for content')
 cmd:option('-style_layers', 'relu1_1,relu2_1,relu3_1,relu4_1,relu5_1', 'layers for style')
 
 local function main(params)
+  param.output_image = 'ori_' .. param.output_image
   if params.gpu >= 0 then
     if params.backend ~= 'clnn' then
       require 'cutorch'
@@ -86,15 +87,11 @@ local function main(params)
   local style_size = math.ceil(params.style_scale * params.image_size)
   local style_image_list = params.style_image:split(',')
   local style_images_caffe = {}
-  local style_images_resized_to_content_caffe = {}
   for _, img_path in ipairs(style_image_list) do
     local img = image.load(img_path, 3)
     img = image.scale(img, style_size, 'bilinear')
-    local img_resized_to_content = image.scale(img, content_image:size(3),content_image:size(2), 'bilinear')
-    img_resized_to_content_caffe = preprocess(img_resized_to_content):float()
     local img_caffe = preprocess(img):float()
     table.insert(style_images_caffe, img_caffe)
-    table.insert(style_images_resized_to_content_caffe, img_resized_to_content_caffe)
   end
 
   -- Handle style blending weights for multiple style inputs
@@ -252,11 +249,6 @@ local function main(params)
     img = torch.randn(content_image:size()):float():mul(0.001)
   elseif params.init == 'image' then
     img = content_image_caffe:clone():float()
-    print(img:size())
-  elseif params.init == 'style' then
-    print('WARN: using style image 1 as initialization.')
-    img = style_images_resized_to_content_caffe[1]:clone():float()
-    print(img:size())
   else
     error('Invalid init type')
   end
@@ -397,26 +389,11 @@ function ContentLoss:__init(strength, target, normalize)
   self.normalize = normalize or false
   self.loss = 0
   self.crit = nn.MSECriterion()
-  
-  local d = target:size(1)
-  local h = target:size(2)
-  local w = target:size(3)
-  self.volume = d * h * w
-  self.strengthMat = torch.Tensor(d,h,w):fill(self.strength)
-  for z = 1,d do
-    for y = math.floor(h/3.0), math.floor(h*2.0/3.0) do
-      for x = math.floor(w/3.0), math.floor(w*2.0/3.0) do
-        self.strengthMat[z][y][x] = self.strength * 100
-      end
-    end
-  end
 end
 
 function ContentLoss:updateOutput(input)
   if input:nElement() == self.target:nElement() then
---    self.loss = self.crit:forward(input, self.target) * self.strength
-    l = torch.pow(input-self.target,2):cmul(self.strengthMat)
-    self.loss = torch.sum(l) / self.volume
+    self.loss = self.crit:forward(input, self.target) * self.strength
   else
     print('WARNING: Skipping content loss')
   end
@@ -426,13 +403,12 @@ end
 
 function ContentLoss:updateGradInput(input, gradOutput)
   if input:nElement() == self.target:nElement() then
---    self.gradInput = self.crit:backward(input, self.target)
-    self.gradInput = torch.cmul(input-self.target, self.strengthMat) * 2/self.volume
+    self.gradInput = self.crit:backward(input, self.target)
   end
   if self.normalize then
     self.gradInput:div(torch.norm(self.gradInput, 1) + 1e-8)
   end
---  self.gradInput:mul(self.strength)
+  self.gradInput:mul(self.strength)
   self.gradInput:add(gradOutput)
   return self.gradInput
 end
