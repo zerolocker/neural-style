@@ -404,9 +404,9 @@ function ContentLoss:__init(strength, target, normalize)
   self.volume = d * h * w
   self.strengthMat = torch.Tensor(d,h,w):fill(self.strength)
   for z = 1,d do
-    for y = math.floor(h/3.0), math.floor(h*2.0/3.0) do
-      for x = math.floor(w/3.0), math.floor(w*2.0/3.0) do
-        self.strengthMat[z][y][x] = self.strength * 100
+    for y = math.floor(h*0.54), math.floor(h*0.68) do
+      for x = math.floor(w*0.28), math.floor(w*0.39) do
+        self.strengthMat[z][y][x] = self.strength * 10
       end
     end
   end
