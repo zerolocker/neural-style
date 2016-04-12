@@ -403,13 +403,14 @@ function ContentLoss:__init(strength, target, normalize)
   local w = target:size(3)
   self.volume = d * h * w
   
-  local multiplier = 10 - 1
+  local multiplier = 100 - 1
   self.strengthMat = torch.Tensor(d,h,w):fill(self.strength)
   local xmin,xmax,ymin,ymax = math.floor(w*0.28),  math.floor(w*0.39),  math.floor(h*0.54),  math.floor(h*0.68)
   print('(xmin,xmax,ymin,ymax)=',xmin,xmax,ymin,ymax)
-  local filter = image.gaussian(_,_,_,false,xmax-xmin+1, ymax-ymin+1) -- see https://github.com/torch/image/blob/master/doc/tensorconstruct.md#res-imagegaussiansize-sigma-amplitude-normalize-
+  local filter = image.gaussian(_,0.1,_,false,xmax-xmin+1, ymax-ymin+1) -- see https://github.com/torch/image/blob/master/doc/tensorconstruct.md#res-imagegaussiansize-sigma-amplitude-normalize-
   for z = 1,d do
-    self.strengthMat[z][{{ymin,ymax},{xmin,xmax}}] = (filter * multiplier + 1) * self.strength
+    -- self.strengthMat[z][{{ymin,ymax},{xmin,xmax}}] = (filter * multiplier + 1) * self.strength
+    self.strengthMat[z][{{ymin,ymax},{xmin,xmax}}] = self.strength
   end
 end
 
