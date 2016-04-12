@@ -351,7 +351,7 @@ function build_filename(output_image, iteration)
   local ext = paths.extname(output_image)
   local basename = paths.basename(output_image, ext)
   local directory = paths.dirname(output_image)
-  return string.format('%s/%s_%d.%s',directory, basename, iteration, ext)
+  return string.format('%s/%s_iter%d.%s',directory, basename, iteration, ext)
 end
 
 

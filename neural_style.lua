@@ -359,7 +359,7 @@ function build_filename(output_image, iteration)
   local ext = paths.extname(output_image)
   local basename = paths.basename(output_image, ext)
   local directory = paths.dirname(output_image)
-  return string.format('%s/%s_%d.%s',directory, basename, iteration, ext)
+  return string.format('%s/%s_iter%d.%s',directory, basename, iteration, ext)
 end
 
 
@@ -402,13 +402,14 @@ function ContentLoss:__init(strength, target, normalize)
   local h = target:size(2)
   local w = target:size(3)
   self.volume = d * h * w
+  
+  local multiplier = 10 - 1
   self.strengthMat = torch.Tensor(d,h,w):fill(self.strength)
+  local xmin,xmax,ymin,ymax = math.floor(w*0.28),  math.floor(w*0.39),  math.floor(h*0.54),  math.floor(h*0.68)
+  print('(xmin,xmax,ymin,ymax)=',xmin,xmax,ymin,ymax)
+  local filter = image.gaussian(_,_,_,false,xmax-xmin+1, ymax-ymin+1) -- see https://github.com/torch/image/blob/master/doc/tensorconstruct.md#res-imagegaussiansize-sigma-amplitude-normalize-
   for z = 1,d do
-    for y = math.floor(h*0.54), math.floor(h*0.68) do
-      for x = math.floor(w*0.28), math.floor(w*0.39) do
-        self.strengthMat[z][y][x] = self.strength * 10
-      end
-    end
+    self.strengthMat[z][{{ymin,ymax},{xmin,xmax}}] = (filter * multiplier + 1) * self.strength
   end
 end
 
