@@ -46,6 +46,7 @@ cmd:option('-content_layers', 'relu4_2', 'layers for content')
 cmd:option('-style_layers', 'relu1_1,relu2_1,relu3_1,relu4_1,relu5_1', 'layers for style')
 
 local function main(params)
+  read_image_bounding_boxes(params.content_image)
   if params.gpu >= 0 then
     if params.backend ~= 'clnn' then
       require 'cutorch'
@@ -409,8 +410,8 @@ function ContentLoss:__init(strength, target, normalize)
   print('(xmin,xmax,ymin,ymax)=',xmin,xmax,ymin,ymax)
   local filter = image.gaussian(_,0.1,_,false,xmax-xmin+1, ymax-ymin+1) -- see https://github.com/torch/image/blob/master/doc/tensorconstruct.md#res-imagegaussiansize-sigma-amplitude-normalize-
   for z = 1,d do
-    -- self.strengthMat[z][{{ymin,ymax},{xmin,xmax}}] = (filter * multiplier + 1) * self.strength
-    self.strengthMat[z][{{ymin,ymax},{xmin,xmax}}] = self.strength
+    filter:fill(1) -- disable gaussian
+    self.strengthMat[z][{{ymin,ymax},{xmin,xmax}}] = (filter * multiplier + 1) * self.strength
   end
 end
 
@@ -520,6 +521,37 @@ function TVLoss:updateGradInput(input, gradOutput)
   self.gradInput:mul(self.strength)
   self.gradInput:add(gradOutput)
   return self.gradInput
+end
+
+function file_exists(file)
+  local f = io.open(file, "rb")
+  if f then f:close() end
+  return f ~= nil
+end
+
+function read_image_bounding_boxes(image_file_name)
+  -- assume the file name is '{image_file_name}.rect.txt'
+  local ext = paths.extname(image_file_name)
+  local basename = paths.basename(image_file_name, ext)
+  local directory = paths.dirname(image_file_name)
+  local file = string.format('%s/%s.rect.txt',directory, basename)
+  if not file_exists(file) then 
+    print(string.format('\nError: looking for bounding box file %s, but it does not exist.\n',file))
+    assert(false)
+  end
+  local lines={}
+  for line in io.lines(file) do 
+    lines[#lines + 1] = line
+  end
+  bounding_boxes = torch.Tensor(#lines, 4)
+  for i = 1, #lines do
+    local arr = lines[i]:split(' ')
+    for j = 1,4 do
+      bounding_boxes[i][j] = tonumber(arr[j])
+    end
+  end
+  print('\n face bounding boxes are: (xmin,ymin,width,height)')
+  print(bounding_boxes)
 end
 
 
