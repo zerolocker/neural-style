@@ -19,6 +19,7 @@ cmd:option('-image_size', 512, 'Maximum height / width of generated image')
 cmd:option('-gpu', 0, 'Zero-indexed ID of the GPU to use; for CPU mode set -gpu = -1')
 
 -- Optimization options
+cmd:option('-face_weight', 100)
 cmd:option('-content_weight', 5e0)
 cmd:option('-style_weight', 1e2)
 cmd:option('-tv_weight', 1e-3)
@@ -46,7 +47,7 @@ cmd:option('-content_layers', 'relu4_2', 'layers for content')
 cmd:option('-style_layers', 'relu1_1,relu2_1,relu3_1,relu4_1,relu5_1', 'layers for style')
 
 local function main(params)
-  read_image_bounding_boxes(params.content_image)
+  face_region = read_image_bounding_boxes(params.content_image)
   if params.gpu >= 0 then
     if params.backend ~= 'clnn' then
       require 'cutorch'
@@ -81,6 +82,12 @@ local function main(params)
   end
   
   local content_image = image.load(params.content_image, 3)
+  local img_h, img_w = content_image:size(2), content_image:size(3)
+  if img_h > img_w then
+    rescale_factor = params.image_size / img_h
+  else
+    rescale_factor = params.image_size / img_w
+  end
   content_image = image.scale(content_image, params.image_size, 'bilinear')
   local content_image_caffe = preprocess(content_image):float()
   
@@ -182,7 +189,7 @@ local function main(params)
         print("Setting up content layer", i, ":", layer.name)
         local target = net:forward(content_image_caffe):clone()
         local norm = params.normalize_gradients
-        local loss_module = nn.ContentLoss(params.content_weight, target, norm):float()
+        local loss_module = nn.ContentLoss(params.content_weight, target, norm, params.face_weight, face_region, name):float()
         if params.gpu >= 0 then
           if params.backend ~= 'clnn' then
             loss_module:cuda()
@@ -391,7 +398,7 @@ end
 -- Define an nn Module to compute content loss in-place
 local ContentLoss, parent = torch.class('nn.ContentLoss', 'nn.Module')
 
-function ContentLoss:__init(strength, target, normalize)
+function ContentLoss:__init(strength, target, normalize, face_weight, face_region, content_layer)
   parent.__init(self)
   self.strength = strength
   self.target = target
@@ -403,15 +410,49 @@ function ContentLoss:__init(strength, target, normalize)
   local h = target:size(2)
   local w = target:size(3)
   self.volume = d * h * w
-  
-  local multiplier = 100 - 1
+
   self.strengthMat = torch.Tensor(d,h,w):fill(self.strength)
-  local xmin,xmax,ymin,ymax = math.floor(w*0.28),  math.floor(w*0.39),  math.floor(h*0.54),  math.floor(h*0.68)
-  print('(xmin,xmax,ymin,ymax)=',xmin,xmax,ymin,ymax)
-  local filter = image.gaussian(_,0.1,_,false,xmax-xmin+1, ymax-ymin+1) -- see https://github.com/torch/image/blob/master/doc/tensorconstruct.md#res-imagegaussiansize-sigma-amplitude-normalize-
-  for z = 1,d do
-    filter:fill(1) -- disable gaussian
-    self.strengthMat[z][{{ymin,ymax},{xmin,xmax}}] = (filter * multiplier + 1) * self.strength
+  for i = 1, face_region:size(1) do  
+    local multiplier = face_weight - 1
+    local xmin, ymin, xmax, ymax = face_region[i][1], face_region[i][2], face_region[i][1]+face_region[i][3], face_region[i][2]+face_region[i][4]
+    print('(xmin,ymin,xmax,ymax)=',xmin,ymin,xmax,ymax)
+    xmin=xmin*rescale_factor; ymin=ymin*rescale_factor; xmax=xmax*rescale_factor; ymax=ymax*rescale_factor
+    if (content_layer == 'relu3_2' or content_layer == 'relu4_2') then
+      xmin = (xmin+2) / 2
+      xmin = (xmin+2) / 2
+      xmin = (xmin+2)
+      ymin = (ymin+2) / 2
+      ymin = (ymin+2) / 2
+      ymin = (ymin+2)
+      xmax = (xmax-2) / 2
+      xmax = (xmax-2) / 2
+      xmax = (xmax-2)
+      ymax = (ymax-2) / 2
+      ymax = (ymax-2) / 2
+      ymax = (ymax-2)
+    end
+    if (content_layer == 'relu4_2') then
+      xmin = (xmin+2) / 2
+      xmin = (xmin+2)
+      ymin = (ymin+2) / 2
+      ymin = (ymin+2)
+      xmax = (xmax-2) / 2
+      xmax = (xmax-2)
+      ymax = (ymax-2) / 2
+      ymax = (ymax-2)
+    end
+    xmin = math.floor(xmin)
+    ymin = math.floor(ymin)
+    xmax = math.floor(xmax)
+    ymax = math.floor(ymax)
+    if (xmax <= xmin) then xmax = xmin+1 end
+    if (ymax <= ymin) then ymax = ymin+1 end
+    print('(xmin,ymin,xmax,ymax)=',xmin,ymin,xmax,ymax)
+    local filter = image.gaussian(_,0.1,_,false,xmax-xmin+1, ymax-ymin+1) -- see https://github.com/torch/image/blob/master/doc/tensorconstruct.md#res-imagegaussiansize-sigma-amplitude-normalize-
+    for z = 1,d do
+      filter:fill(1) -- disable gaussian
+      self.strengthMat[z][{{ymin,ymax},{xmin,xmax}}] = (filter * multiplier + 1) * self.strength
+    end
   end
 end
 
@@ -543,7 +584,7 @@ function read_image_bounding_boxes(image_file_name)
   for line in io.lines(file) do 
     lines[#lines + 1] = line
   end
-  bounding_boxes = torch.Tensor(#lines, 4)
+  local bounding_boxes = torch.Tensor(#lines, 4)
   for i = 1, #lines do
     local arr = lines[i]:split(' ')
     for j = 1,4 do
@@ -552,6 +593,7 @@ function read_image_bounding_boxes(image_file_name)
   end
   print('\n face bounding boxes are: (xmin,ymin,width,height)')
   print(bounding_boxes)
+  return bounding_boxes
 end
 
 
