@@ -20,6 +20,7 @@ cmd:option('-gpu', 0, 'Zero-indexed ID of the GPU to use; for CPU mode set -gpu 
 
 -- Optimization options
 cmd:option('-face_weight', 100)
+cmd:option('-face_layer', 'relu3_2')
 cmd:option('-content_weight', 5e0)
 cmd:option('-style_weight', 1e2)
 cmd:option('-tv_weight', 1e-3)
@@ -189,7 +190,7 @@ local function main(params)
         print("Setting up content layer", i, ":", layer.name)
         local target = net:forward(content_image_caffe):clone()
         local norm = params.normalize_gradients
-        local loss_module = nn.ContentLoss(params.content_weight, target, norm, params.face_weight, face_region, name):float()
+        local loss_module = nn.ContentLoss(params.content_weight, target, norm, params.face_weight, false, face_region, name):float()
         if params.gpu >= 0 then
           if params.backend ~= 'clnn' then
             loss_module:cuda()
@@ -200,6 +201,21 @@ local function main(params)
         net:add(loss_module)
         table.insert(content_losses, loss_module)
         next_content_idx = next_content_idx + 1
+      end
+      if name == params.face_layer then
+        print("Setting up  FACE  layer", i, ":", layer.name)
+        local target = net:forward(content_image_caffe):clone()
+        local norm = params.normalize_gradients
+        local loss_module = nn.ContentLoss(params.content_weight, target, norm, params.face_weight, true, face_region, name):float()
+        if params.gpu >= 0 then
+          if params.backend ~= 'clnn' then
+            loss_module:cuda()
+          else
+            loss_module:cl()
+          end
+        end
+        net:add(loss_module)
+        table.insert(content_losses, loss_module)
       end
       if name == style_layers[next_style_idx] then
         print("Setting up style layer  ", i, ":", layer.name)
@@ -398,7 +414,7 @@ end
 -- Define an nn Module to compute content loss in-place
 local ContentLoss, parent = torch.class('nn.ContentLoss', 'nn.Module')
 
-function ContentLoss:__init(strength, target, normalize, face_weight, face_region, content_layer)
+function ContentLoss:__init(strength, target, normalize, face_weight, isFaceLayer, face_region, content_layer)
   parent.__init(self)
   self.strength = strength
   self.target = target
@@ -411,11 +427,12 @@ function ContentLoss:__init(strength, target, normalize, face_weight, face_regio
   local w = target:size(3)
   self.volume = d * h * w
 
-  self.strengthMat = torch.Tensor(d,h,w):fill(self.strength)
+  self.strengthMat = torch.Tensor(d,h,w)
+  if isFaceLayer then self.strengthMat:fill(0) else self.strengthMat:fill(self.strength) end
+
   for i = 1, face_region:size(1) do  
-    local multiplier = face_weight - 1
     local xmin, ymin, xmax, ymax = face_region[i][1], face_region[i][2], face_region[i][1]+face_region[i][3], face_region[i][2]+face_region[i][4]
-    print('(xmin,ymin,xmax,ymax)=',xmin,ymin,xmax,ymax)
+    print('R=(xmin,ymin,xmax,ymax)=',xmin,ymin,xmax,ymax)
     xmin=xmin*rescale_factor; ymin=ymin*rescale_factor; xmax=xmax*rescale_factor; ymax=ymax*rescale_factor
     if (content_layer == 'relu3_2' or content_layer == 'relu4_2') then
       xmin = (xmin+2) / 2
@@ -441,17 +458,17 @@ function ContentLoss:__init(strength, target, normalize, face_weight, face_regio
       ymax = (ymax-2) / 2
       ymax = (ymax-2)
     end
+    if (xmax < xmin) then local mid=(xmin+xmax)/2; xmin=mid; xmax=mid+1; end  -- enforce minimum width  is two pixels
+    if (ymax < ymin) then local mid=(ymin+ymax)/2; ymin=mid; ymax=mid+1; end  -- enforce minimum height is two pixels
     xmin = math.floor(xmin)
     ymin = math.floor(ymin)
     xmax = math.floor(xmax)
     ymax = math.floor(ymax)
-    if (xmax <= xmin) then xmax = xmin+1 end
-    if (ymax <= ymin) then ymax = ymin+1 end
-    print('(xmin,ymin,xmax,ymax)=',xmin,ymin,xmax,ymax)
-    local filter = image.gaussian(_,0.1,_,false,xmax-xmin+1, ymax-ymin+1) -- see https://github.com/torch/image/blob/master/doc/tensorconstruct.md#res-imagegaussiansize-sigma-amplitude-normalize-
+    print('R\'=(xmin,ymin,xmax,ymax)=',xmin,ymin,xmax,ymax)
+    local mask = torch.DoubleTensor(xmax-xmin+1, ymax-ymin+1)
+    if isFaceLayer then mask:fill(1) else mask:fill(0) end
     for z = 1,d do
-      filter:fill(1) -- disable gaussian
-      self.strengthMat[z][{{ymin,ymax},{xmin,xmax}}] = (filter * multiplier + 1) * self.strength
+      self.strengthMat[z][{{ymin,ymax},{xmin,xmax}}] = mask * (face_weight * self.strength)
     end
   end
 end
