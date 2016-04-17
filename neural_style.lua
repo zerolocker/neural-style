@@ -594,8 +594,8 @@ function read_image_bounding_boxes(image_file_name)
   local directory = paths.dirname(image_file_name)
   local file = string.format('%s/%s.rect.txt',directory, basename)
   if not file_exists(file) then 
-    print(string.format('\nError: looking for bounding box file %s, but it does not exist.\n',file))
-    assert(false)
+    print(string.format('\nWarning: looking for bounding box file %s, but it does not exist.\n',file))
+    return nil
   end
   local lines={}
   for line in io.lines(file) do 
