@@ -2,11 +2,10 @@ function draw4BoundingBoxes(filename)
     [~,image_name,~] = fileparts(filename);
     I = imread(filename);
     figure, imshow(I);
-    prompts = {'Draw left eye bounding box', 'Draw right eye bounding box', ...
-        'Draw nose bounding box', 'Draw mounth bounding box'};
+    prompts = {'Draw 4 face bounding boxes (try to cover the margin of the face as close as possible)'};
     rects = [];
     for i = 1:4
-        title(prompts{i});
+        title(prompts{1});
         rect = int32(getrect);
         rects = [rects;rect];
         hold on;
@@ -19,4 +18,5 @@ function draw4BoundingBoxes(filename)
         fprintf(fout,'\n');
     end
     fclose(fout);
+    title(sprintf('Done! File saved to %s.rect.txt',image_name));
 end
