@@ -46,6 +46,7 @@ cmd:option('-content_layers', 'relu4_2', 'layers for content')
 cmd:option('-style_layers', 'relu1_1,relu2_1,relu3_1,relu4_1,relu5_1', 'layers for style')
 
 local function main(params)
+  print(params)
   params.output_image = 'ori_' .. params.output_image
   if params.gpu >= 0 then
     if params.backend ~= 'clnn' then
